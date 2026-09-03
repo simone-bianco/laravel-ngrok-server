@@ -12,7 +12,7 @@ final readonly class RuntimeIdentityProbe
 {
     public function __construct(private Factory $http, private NgrokRuntimeIdentityVerifier $identity) {}
 
-    public function healthy(NgrokLocalUpstream $upstream, string $hostHeader = ''): bool
+    public function observe(NgrokLocalUpstream $upstream, string $hostHeader = ''): RuntimeIdentityObservation
     {
         $nonce = random_bytes(32);
         $encoded = $this->identity->encodeNonce($nonce);
@@ -27,14 +27,26 @@ final readonly class RuntimeIdentityProbe
                 $request = $request->withHeader('Host', $hostHeader);
             }
             $response = $request->get($upstream->identityUrl());
-            if (! $response->successful() || (int) $response->json('protocol_version') !== $this->identity->protocolVersion()) {
-                return false;
+            $status = $response->status();
+            if ($response->serverError() || in_array($status, [408, 425, 429], true)) {
+                return RuntimeIdentityObservation::unavailable();
+            }
+            if (! $response->successful()
+                || (int) $response->json('protocol_version') !== $this->identity->protocolVersion()) {
+                return RuntimeIdentityObservation::mismatch();
             }
             $mac = $response->json('mac');
 
-            return is_string($mac) && $this->identity->verify($nonce, $mac);
+            return is_string($mac) && $this->identity->verify($nonce, $mac)
+                ? RuntimeIdentityObservation::ready()
+                : RuntimeIdentityObservation::mismatch();
         } catch (\Throwable) {
-            return false;
+            return RuntimeIdentityObservation::unavailable();
         }
+    }
+
+    public function healthy(NgrokLocalUpstream $upstream, string $hostHeader = ''): bool
+    {
+        return $this->observe($upstream, $hostHeader)->state === RuntimeIdentityObservation::READY;
     }
 }

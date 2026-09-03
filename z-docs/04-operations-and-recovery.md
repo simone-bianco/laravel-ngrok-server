@@ -84,6 +84,12 @@ sequenceDiagram
 
 If the process crashes between fences, the durable gate remains disabled and later starts fail closed. A subsequent recovery reclaims the gate while holding the installation lock. Recovery never converts ambiguous evidence into kill authority.
 
+## Runtime Probe Stability
+
+After startup, one failed upstream/Agent API availability probe does not stop a healthy owned process. Transient availability failures publish `degraded`; recovery inside `runtime_probe_failure_grace_ms` clears the failure streak and returns to Ready without changing PID/spawn attempt. Continuous failure past the grace window triggers the normal owned teardown. Exact identity or Agent API endpoint mismatch remains immediate stop authority.
+
+This policy is intentionally about **continuous elapsed unavailability**, not retry count. CPU starvation can delay both the reconcile loop and HTTP responses; elapsed-time hysteresis makes that distinction observable while preserving fail-closed mismatch handling.
+
 ## Status-First Troubleshooting
 
-Inspect the host's sanitized status projection before acting. `bootstrap_required`, `recovery_required`, transition-in-progress, blocked policy, unavailable identity, and Agent API mismatch are distinct conditions. Preserve that distinction in host HTTP responses and operator UX.
+Inspect the host's sanitized status projection before acting. `bootstrap_required`, `recovery_required`, transition-in-progress, blocked policy, temporary probe degradation, unavailable identity, and Agent API mismatch are distinct conditions. Preserve that distinction in host HTTP responses and operator UX.

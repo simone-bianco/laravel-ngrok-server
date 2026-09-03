@@ -49,9 +49,12 @@ flowchart LR
 | Bootstrap required | Run explicit bootstrap only for a new installation with no prior lifecycle artifacts. |
 | Recovery required | Disable desired state, preserve artifacts, and run recovery. |
 | Transition in progress | A fenced bootstrap/recovery owns the durable gate. Retry status later; do not bypass the gate. |
-| Upstream identity unavailable | Restore the configured loopback upstream and host identity verifier before starting remote access. |
-| Agent API unavailable or mismatched | Verify the selected loopback port range and exact owned endpoint; do not trust a different local ngrok process. |
-| Stale heartbeat | Treat status as stale and investigate supervisor ownership before changing state. |
+| Upstream identity temporarily unavailable | Keep exact owned child during grace; timeout/5xx is not proof of wrong identity. |
+| Upstream identity protocol/MAC mismatch | Immediate owned teardown; treat as security/authority failure. |
+| Agent API temporarily unavailable | Owned child stays alive and status becomes `degraded` during `runtime_probe_failure_grace_ms`; investigate local CPU/upstream pressure before forcing lifecycle changes. |
+| Agent API endpoint mismatch | Immediate owned teardown; verify the selected loopback port and exact endpoint identity, never hide the mismatch behind retry grace. |
+| Repeated endpoint offline/restart during CPU load | Compare child PID + ledger `spawn_attempt_id`; a transient probe failure must keep both stable. Run a CPU-heavy existing build as a non-destructive stress probe and verify no attempt/PID rotation. |
+| Stale heartbeat | Treat status as stale and investigate supervisor ownership before changing state; stale status alone does not grant kill/restart authority. |
 
 ## Prohibited Recovery Shortcuts
 

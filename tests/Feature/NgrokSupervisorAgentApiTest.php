@@ -66,9 +66,10 @@ final class NgrokSupervisorAgentApiTest extends TestCase
         $this->assertStoppedWithReason($owned, 'agent_api_endpoint_mismatch');
     }
 
-    public function test_agent_api_unavailability_stops_the_owned_child_after_startup_grace(): void
+    public function test_transient_agent_api_unavailability_keeps_owned_child_running_during_failure_grace(): void
     {
         config()->set('ngrok-server.agent_api_startup_grace_ms', 100);
+        config()->set('ngrok-server.runtime_probe_failure_grace_ms', 60_000);
         [$supervisor, $owned] = $this->ownedSupervisor(microtime(true) - 1);
         Http::fake(function (Request $request) use ($owned): mixed {
             if ($request->url() === $owned->launch->upstream->identityUrl()) {
@@ -80,7 +81,66 @@ final class NgrokSupervisorAgentApiTest extends TestCase
 
         (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
 
+        $this->assertRunningWithReason($owned, 'agent_api_temporarily_unavailable');
+    }
+
+    public function test_agent_api_unavailability_stops_owned_child_after_failure_grace(): void
+    {
+        config()->set('ngrok-server.agent_api_startup_grace_ms', 100);
+        config()->set('ngrok-server.runtime_probe_failure_grace_ms', 100);
+        [$supervisor, $owned] = $this->ownedSupervisor(microtime(true) - 1);
+        $this->setProperty($supervisor, 'agentApiUnavailableSince', microtime(true) - 1);
+        Http::fake(function (Request $request) use ($owned): mixed {
+            if ($request->url() === $owned->launch->upstream->identityUrl()) {
+                return Http::response(['protocol_version' => 1, 'mac' => 'valid']);
+            }
+
+            return Http::response([], 503);
+        });
+
+        (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
+
         $this->assertStoppedWithReason($owned, 'agent_api_unavailable');
+    }
+
+    public function test_transient_upstream_identity_unavailability_keeps_owned_child_running(): void
+    {
+        config()->set('ngrok-server.runtime_probe_failure_grace_ms', 60_000);
+        [$supervisor, $owned] = $this->ownedSupervisor(microtime(true) - 1);
+        Http::fake(fn (Request $request): mixed => $request->url() === $owned->launch->upstream->identityUrl()
+            ? Http::response([], 503)
+            : Http::response([], 500));
+
+        (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
+
+        $this->assertRunningWithReason($owned, 'upstream_identity_temporarily_unavailable');
+    }
+
+    public function test_upstream_identity_unavailability_stops_owned_child_after_failure_grace(): void
+    {
+        config()->set('ngrok-server.runtime_probe_failure_grace_ms', 100);
+        [$supervisor, $owned] = $this->ownedSupervisor(microtime(true) - 1);
+        $this->setProperty($supervisor, 'identityUnavailableSince', microtime(true) - 1);
+        Http::fake(fn (Request $request): mixed => $request->url() === $owned->launch->upstream->identityUrl()
+            ? Http::response([], 503)
+            : Http::response([], 500));
+
+        (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
+
+        $this->assertStoppedWithReason($owned, 'upstream_identity_unavailable');
+    }
+
+    public function test_upstream_identity_mismatch_stops_owned_child_immediately(): void
+    {
+        config()->set('ngrok-server.runtime_probe_failure_grace_ms', 60_000);
+        [$supervisor, $owned] = $this->ownedSupervisor(microtime(true) - 1);
+        Http::fake(fn (Request $request): mixed => $request->url() === $owned->launch->upstream->identityUrl()
+            ? Http::response(['protocol_version' => 1, 'mac' => 'invalid'])
+            : Http::response([], 500));
+
+        (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
+
+        $this->assertStoppedWithReason($owned, 'upstream_identity_mismatch');
     }
 
     /** @return array{NgrokSupervisor, OwnedNgrokProcess} */
@@ -147,6 +207,16 @@ final class NgrokSupervisorAgentApiTest extends TestCase
             'inspect' => false,
             'pooling_enabled' => false,
         ], $changes);
+    }
+
+    private function assertRunningWithReason(OwnedNgrokProcess $owned, string $reason): void
+    {
+        self::assertTrue($owned->process->isRunning());
+        self::assertFileExists($owned->launch->configPath);
+        self::assertSame('child_active', app(NgrokLifecycleLedgerStore::class)->read()['state'] ?? null);
+        $snapshot = app(NgrokRuntimeSnapshotStore::class)->read();
+        self::assertSame('degraded', $snapshot['summary'] ?? null);
+        self::assertContains($reason, $snapshot['readiness']['reasons'] ?? []);
     }
 
     private function assertStoppedWithReason(OwnedNgrokProcess $owned, string $reason): void

@@ -46,7 +46,8 @@ The doctor also constructs `NgrokRuntimeControlService`, `NgrokRuntimeRecoverySe
 | `NGROK_SERVER_AGENT_API_PORT_MAX` | `4099` | Last loopback Agent API candidate port. |
 | `NGROK_SERVER_DB_LOCK_TIMEOUT_MS` | `2000` | Host lifecycle fence acquisition budget. |
 | `NGROK_SERVER_RECONCILE_INTERVAL_MS` | `1000` | Supervisor reconciliation interval. |
-| `NGROK_SERVER_AGENT_API_STARTUP_GRACE_MS` | `5000` | Agent API startup grace. |
+| `NGROK_SERVER_AGENT_API_STARTUP_GRACE_MS` | `5000` | Agent API startup grace before post-start availability hysteresis begins. |
+| `NGROK_SERVER_RUNTIME_PROBE_FAILURE_GRACE_MS` | `30000` | Continuous transient upstream/Agent API unavailability allowed before owned teardown; exact mismatch still stops immediately. |
 | `NGROK_SERVER_READY_OBSERVATION_MAX_AGE_MS` | `2000` | Maximum Ready evidence age. |
 | `NGROK_SERVER_HEARTBEAT_STALE_AFTER_MS` | `6000` | Status heartbeat staleness threshold. |
 | `NGROK_SERVER_STOP_GRACE_SECONDS` | `5` | Owned child graceful-stop budget. |

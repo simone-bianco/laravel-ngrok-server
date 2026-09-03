@@ -85,6 +85,8 @@ stateDiagram-v2
 
 Ready is an evidence-backed state, not merely a running PID. Publication requires the same committed settings generation, the exact owned process attempt, a healthy upstream identity, and a matching loopback Agent API observation.
 
+Runtime probes distinguish **mismatch** from **temporary unavailability**. Protocol/MAC or exact endpoint mismatches are security/ownership failures and stop the owned child immediately. HTTP timeout, 5xx, throttling or other transport unavailability does not prove wrong ownership: once startup grace is over the supervisor publishes `degraded` and keeps the exact owned child alive for `runtime_probe_failure_grace_ms`; only continuous unavailability beyond that window tears it down. A successful probe clears the failure window. This hysteresis prevents CPU starvation or short local stalls from becoming ngrok stop/spawn flapping without weakening identity checks.
+
 ## Generation Binding
 
 Desired-state mutations return `NgrokDesiredStateMutation`, containing the committed `NgrokSettingsVersion` and whether data changed. Only a changed start wakes a detached supervisor. The spawned waiter receives the committed incarnation and revision; it exits harmlessly if that generation is no longer active. This prevents stale post-commit side effects from reviving an older desired state.

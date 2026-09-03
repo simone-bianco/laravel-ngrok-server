@@ -16,6 +16,7 @@ use SimoneBianco\LaravelNgrokServer\Process\Launch\NgrokLaunchPreparation;
 use SimoneBianco\LaravelNgrokServer\Process\Launch\NgrokLaunchPreparer;
 use SimoneBianco\LaravelNgrokServer\Process\Launch\NgrokProcessLauncher;
 use SimoneBianco\LaravelNgrokServer\Process\Launch\OwnedNgrokProcess;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\RuntimeIdentityObservation;
 use SimoneBianco\LaravelNgrokServer\Runtime\Identity\RuntimeIdentityProbe;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokLifecycleLedgerStore;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokReadyObservation;
@@ -43,6 +44,10 @@ final class NgrokSupervisor
     /** @var array<string, mixed>|null */
     private ?array $manifest = null;
 
+    private ?float $identityUnavailableSince = null;
+
+    private ?float $agentApiUnavailableSince = null;
+
     public function __construct(
         private readonly NgrokRuntimeLock $lock,
         private readonly NgrokRuntimeManifestStore $manifests,
@@ -56,6 +61,7 @@ final class NgrokSupervisor
         private readonly NgrokProcessLauncher $processes,
         private readonly NgrokAgentApiClient $agentApi,
         private readonly NgrokAgentApiAvailabilityPolicy $agentApiAvailability,
+        private readonly NgrokProbeStabilityPolicy $probeStability,
         private readonly RuntimeIdentityProbe $identity,
         private readonly NgrokRuntimeRemoteAccessPolicy $debugPolicy,
         private readonly NgrokSupervisorShutdownSignal $shutdownSignal,
@@ -167,6 +173,7 @@ final class NgrokSupervisor
             $this->ledgers->markClean($this->requireManifest(), $attempt);
             $this->removeRuntimeConfig($this->owned);
             $this->owned = null;
+            $this->resetProbeFailures();
         }
 
         if ($this->owned !== null) {
@@ -183,15 +190,28 @@ final class NgrokSupervisor
             if (! $this->owned->launch->settings->version->equals($settings->version)) {
                 $this->owned = $this->owned->withSettings($settings);
             }
-            $identityHealthy = $this->identity->healthy(
+            $identity = $this->identity->observe(
                 $this->owned->launch->upstream,
                 $this->owned->launch->upstreamHostHeader,
             );
-            if (! $identityHealthy) {
+            if ($identity->state === RuntimeIdentityObservation::MISMATCH) {
                 $this->stopOwned('upstream_identity_mismatch', $settings);
 
                 return;
             }
+            if ($identity->state === RuntimeIdentityObservation::UNAVAILABLE) {
+                $this->identityUnavailableSince ??= microtime(true);
+                if ($this->probeStability->transientFailureGraceExpired($this->identityUnavailableSince)) {
+                    $this->stopOwned('upstream_identity_unavailable', $settings);
+
+                    return;
+                }
+                $this->publish('degraded', 'degraded', ['upstream_identity_temporarily_unavailable'], $settings, $this->owned);
+
+                return;
+            }
+            $this->identityUnavailableSince = null;
+
             $agentApi = $this->agentApi->observe($this->owned->launch);
             if ($agentApi->state === NgrokAgentApiObservation::MISMATCH) {
                 $this->stopOwned('agent_api_endpoint_mismatch', $settings);
@@ -199,16 +219,24 @@ final class NgrokSupervisor
                 return;
             }
             if ($agentApi->state === NgrokAgentApiObservation::UNAVAILABLE) {
-                if ($this->agentApiAvailability->startupGraceExpired($this->owned)) {
+                if (! $this->agentApiAvailability->startupGraceExpired($this->owned)) {
+                    $this->agentApiUnavailableSince = null;
+                    $this->publish('starting', 'starting', ['edge_not_ready'], $settings, $this->owned);
+
+                    return;
+                }
+                $this->agentApiUnavailableSince ??= microtime(true);
+                if ($this->probeStability->transientFailureGraceExpired($this->agentApiUnavailableSince)) {
                     $this->stopOwned('agent_api_unavailable', $settings);
 
                     return;
                 }
-                $this->publish('starting', 'starting', ['edge_not_ready'], $settings, $this->owned);
+                $this->publish('degraded', 'degraded', ['agent_api_temporarily_unavailable'], $settings, $this->owned);
 
                 return;
             }
-            $observation = NgrokReadyObservation::capture($settings, $this->owned, $identityHealthy, $agentApi);
+            $this->agentApiUnavailableSince = null;
+            $observation = NgrokReadyObservation::capture($settings, $this->owned, true, $agentApi);
             $this->publishReadyFenced($settings, $this->owned, $observation);
 
             return;
@@ -228,13 +256,21 @@ final class NgrokSupervisor
 
         $upstream = $this->preparer->resolveUpstream();
         $upstreamHostHeader = $this->preparer->resolveUpstreamHostHeader();
-        if (! $this->identity->healthy($upstream, $upstreamHostHeader)) {
-            $this->publish('blocked', 'blocked', ['upstream_identity_unavailable'], $settings, ledger: $ledger);
+        $identity = $this->identity->observe($upstream, $upstreamHostHeader);
+        if ($identity->state !== RuntimeIdentityObservation::READY) {
+            $this->publish(
+                'blocked',
+                'blocked',
+                [$identity->state === RuntimeIdentityObservation::MISMATCH ? 'upstream_identity_mismatch' : 'upstream_identity_unavailable'],
+                $settings,
+                ledger: $ledger,
+            );
 
             return;
         }
         $preparation = $this->preparer->prepare($settings, $this->supervisorInstanceId, $this->bootEpochId);
         $this->owned = $this->spawnFenced($preparation);
+        $this->resetProbeFailures();
         try {
             $this->publish('starting', 'starting', [], $settings, $this->owned);
         } catch (\Throwable $exception) {
@@ -351,6 +387,7 @@ final class NgrokSupervisor
             $this->ledgers->markClean($this->requireManifest(), $attempt);
             $this->removeRuntimeConfig($owned);
             $this->owned = null;
+            $this->resetProbeFailures();
             $this->publishSafely($settings?->desiredEnabled ? 'blocked' : 'stopped', $settings?->desiredEnabled ? 'blocked' : 'stopped', [$reason], $settings);
 
             return;
@@ -360,6 +397,12 @@ final class NgrokSupervisor
         } catch (\Throwable) {
         }
         throw new RuntimeException('Unable to verify ngrok process-tree exit.');
+    }
+
+    private function resetProbeFailures(): void
+    {
+        $this->identityUnavailableSince = null;
+        $this->agentApiUnavailableSince = null;
     }
 
     /** @param list<string> $reasons @param array<string, mixed>|null $ledger */
