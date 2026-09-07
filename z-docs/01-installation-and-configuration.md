@@ -32,6 +32,10 @@ Bind adapters in a host service provider, then run:
 php artisan ngrok-server:doctor
 ```
 
+## Identity Probe Replacement
+
+The package binds `NgrokRuntimeIdentityProbe` to its HMAC-backed `RuntimeIdentityProbe` by default. Hosts that cannot expose the default identity endpoint may replace only this probe contract. A replacement must accept the package's already validated loopback upstream, reject redirects and proxying, verify TLS for any external attestation, and classify every ambiguous response as unavailable or mismatched. It must not accept request-controlled targets or treat a successful HTTP status as identity evidence.
+
 The doctor also constructs `NgrokRuntimeControlService`, `NgrokRuntimeRecoveryService`, `NgrokSupervisor`, and `NgrokRuntimeStatusService`. On Windows it fails when `ext-ffi` is unavailable.
 
 ## Configuration Reference

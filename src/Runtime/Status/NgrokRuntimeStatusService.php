@@ -8,12 +8,12 @@ use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokDirectStatusProjectio
 use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeLifecycleFence;
 use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeRemoteAccessPolicy;
 use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeSettingsSnapshotProvider;
+use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeUpstreamProvider;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokLifecycleLedgerStore;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokRuntimeManifestStore;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokRuntimeSpawnGate;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokRuntimeStatusSnapshotReader;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokSettingsGeneration;
-use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokLocalUpstream;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokSettingsSnapshot;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokSettingsVersion;
 
@@ -29,6 +29,7 @@ final readonly class NgrokRuntimeStatusService
         private NgrokSettingsGeneration $settingsGeneration,
         private NgrokRuntimeRemoteAccessPolicy $debugPolicy,
         private NgrokDirectStatusProjection $directStatus,
+        private NgrokRuntimeUpstreamProvider $upstream,
     ) {}
 
     /** @return array<string, mixed> */
@@ -371,8 +372,8 @@ final readonly class NgrokRuntimeStatusService
     private function canonicalUpstream(): ?string
     {
         try {
-            return NgrokLocalUpstream::fromString((string) config('ngrok-server.upstream_url'))->value();
-        } catch (\InvalidArgumentException) {
+            return $this->upstream->upstream()->value();
+        } catch (\Throwable) {
             return null;
         }
     }

@@ -6,6 +6,7 @@ namespace SimoneBianco\LaravelNgrokServer\Process\Launch;
 
 use RuntimeException;
 use SimoneBianco\LaravelNgrokServer\Contracts\NgrokRemoteAccessPolicy;
+use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeUpstreamProvider;
 use SimoneBianco\LaravelNgrokServer\Process\Binary\NgrokBinaryResolver;
 use SimoneBianco\LaravelNgrokServer\Process\Environment\NgrokChildEnvironmentBuilder;
 use SimoneBianco\LaravelNgrokServer\Process\Ownership\NgrokProcessOwnershipResolver;
@@ -21,6 +22,7 @@ final readonly class NgrokLaunchPreparer
         private NgrokChildEnvironmentBuilder $environment,
         private NgrokProcessOwnershipResolver $ownership,
         private NgrokRemoteAccessPolicy $debugPolicy,
+        private NgrokRuntimeUpstreamProvider $upstream,
     ) {}
 
     public function prepare(NgrokSettingsSnapshot $settings, string $supervisorInstanceId, string $bootEpochId, array $excludedPorts = []): NgrokLaunchPreparation
@@ -67,24 +69,11 @@ final readonly class NgrokLaunchPreparer
 
     public function resolveUpstream(): NgrokLocalUpstream
     {
-        return NgrokLocalUpstream::fromString((string) config('ngrok-server.upstream_url'));
+        return $this->upstream->upstream();
     }
 
     public function resolveUpstreamHostHeader(): string
     {
-        $host = parse_url((string) config('app.url'), PHP_URL_HOST);
-        if (! is_string($host) || $host === '') {
-            throw new RuntimeException('APP_URL must define the ngrok upstream Host header.');
-        }
-        $host = strtolower($host);
-        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            return $host;
-        }
-        if (strlen($host) > 253
-            || preg_match('/\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/D', $host) !== 1) {
-            throw new RuntimeException('APP_URL contains an invalid ngrok upstream Host header.');
-        }
-
-        return $host;
+        return $this->upstream->hostHeader();
     }
 }

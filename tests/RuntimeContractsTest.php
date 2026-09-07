@@ -11,7 +11,9 @@ use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeLifecycleFence
 use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeLock;
 use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeRemoteAccessPolicy;
 use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeSettingsSnapshotProvider;
+use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokSupervisor;
 use SimoneBianco\LaravelNgrokServer\Runtime\Bootstrap\NgrokRuntimeBootstrapper;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\NgrokRuntimeIdentityProbe;
 use SimoneBianco\LaravelNgrokServer\Runtime\Identity\RuntimeIdentityProbe;
 use SimoneBianco\LaravelNgrokServer\Runtime\Status\NgrokRuntimeStatusService;
 
@@ -29,6 +31,9 @@ final class RuntimeContractsTest extends TestCase
         self::assertSame([
             NgrokRuntimeIdentityVerifier::class,
         ], $this->constructorTypes(RuntimeIdentityProbe::class, ['identity']));
+        self::assertSame([
+            NgrokRuntimeIdentityProbe::class,
+        ], $this->constructorTypes(NgrokSupervisor::class, ['identity']));
         self::assertSame([
             NgrokRuntimeSettingsSnapshotProvider::class,
             NgrokRuntimeRemoteAccessPolicy::class,

@@ -12,8 +12,12 @@ use SimoneBianco\LaravelNgrokServer\Process\Control\NgrokRuntimeControlService;
 use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokRuntimeRecoveryService;
 use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokSupervisor;
 use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokSupervisorLock;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\NgrokRuntimeIdentityProbe;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\RuntimeIdentityObservation;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\RuntimeIdentityProbe;
 use SimoneBianco\LaravelNgrokServer\Runtime\Status\NgrokRuntimeStatusService;
 use SimoneBianco\LaravelNgrokServer\Tests\Support\FakeRealtimeStarter;
+use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokLocalUpstream;
 
 require_once __DIR__.'/TestCase.php';
 
@@ -41,6 +45,7 @@ final class ServiceProviderTest extends TestCase
         self::assertTrue($this->app->bound(NgrokRuntimeRecoveryService::class));
         self::assertTrue($this->app->bound(NgrokSupervisor::class));
         self::assertTrue($this->app->bound(NgrokHostIntegrationValidator::class));
+        self::assertInstanceOf(RuntimeIdentityProbe::class, $this->app->make(NgrokRuntimeIdentityProbe::class));
 
         $this->artisan('list')
             ->expectsOutputToContain('ngrok-server:doctor')
@@ -49,6 +54,25 @@ final class ServiceProviderTest extends TestCase
             ->expectsOutputToContain('ngrok-server:ngrok-recover')
             ->expectsOutputToContain('ngrok-server:ngrok-shutdown')
             ->assertSuccessful();
+    }
+
+    public function test_a_host_can_replace_the_runtime_identity_probe(): void
+    {
+        $probe = new class implements NgrokRuntimeIdentityProbe
+        {
+            public function observe(NgrokLocalUpstream $upstream, string $hostHeader = ''): RuntimeIdentityObservation
+            {
+                return RuntimeIdentityObservation::mismatch();
+            }
+
+            public function healthy(NgrokLocalUpstream $upstream, string $hostHeader = ''): bool
+            {
+                return false;
+            }
+        };
+        $this->app->instance(NgrokRuntimeIdentityProbe::class, $probe);
+
+        self::assertSame($probe, $this->app->make(NgrokRuntimeIdentityProbe::class));
     }
 
     public function test_doctor_reports_missing_host_adapters_actionably(): void

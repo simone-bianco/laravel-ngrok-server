@@ -12,6 +12,7 @@ use SimoneBianco\LaravelNgrokServer\Console\Commands\NgrokShutdownCommand;
 use SimoneBianco\LaravelNgrokServer\Console\Commands\NgrokSupervisorCommand;
 use SimoneBianco\LaravelNgrokServer\Contracts\NgrokSupervisorSpawner;
 use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeLock;
+use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeUpstreamProvider;
 use SimoneBianco\LaravelNgrokServer\Integration\NgrokHostIntegrationValidator;
 use SimoneBianco\LaravelNgrokServer\Process\Control\NgrokRuntimeControlService;
 use SimoneBianco\LaravelNgrokServer\Process\Supervisor\AgentApiReachabilityProbe;
@@ -21,6 +22,9 @@ use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokRuntimeRecoveryServi
 use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokSupervisor;
 use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokSupervisorLock;
 use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokSupervisorShutdownSignal;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\ConfiguredNgrokRuntimeUpstreamProvider;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\NgrokRuntimeIdentityProbe;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\RuntimeIdentityProbe;
 
 final class LaravelNgrokServerServiceProvider extends ServiceProvider
 {
@@ -29,6 +33,8 @@ final class LaravelNgrokServerServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/ngrok-server.php', 'ngrok-server');
         $this->app->singleton(NgrokHostIntegrationValidator::class);
         $this->app->singleton(NgrokRuntimeLock::class, NgrokSupervisorLock::class);
+        $this->app->singleton(NgrokRuntimeIdentityProbe::class, RuntimeIdentityProbe::class);
+        $this->app->singleton(NgrokRuntimeUpstreamProvider::class, ConfiguredNgrokRuntimeUpstreamProvider::class);
         $this->app->singleton(NgrokSupervisorShutdownSignal::class);
         $this->app->singleton(AgentApiReachabilityProbe::class, HttpAgentApiReachabilityProbe::class);
         $this->app->singleton(NgrokSupervisorSpawner::class, NativeNgrokSupervisorSpawner::class);

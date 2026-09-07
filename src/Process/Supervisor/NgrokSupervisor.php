@@ -16,8 +16,8 @@ use SimoneBianco\LaravelNgrokServer\Process\Launch\NgrokLaunchPreparation;
 use SimoneBianco\LaravelNgrokServer\Process\Launch\NgrokLaunchPreparer;
 use SimoneBianco\LaravelNgrokServer\Process\Launch\NgrokProcessLauncher;
 use SimoneBianco\LaravelNgrokServer\Process\Launch\OwnedNgrokProcess;
+use SimoneBianco\LaravelNgrokServer\Runtime\Identity\NgrokRuntimeIdentityProbe;
 use SimoneBianco\LaravelNgrokServer\Runtime\Identity\RuntimeIdentityObservation;
-use SimoneBianco\LaravelNgrokServer\Runtime\Identity\RuntimeIdentityProbe;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokLifecycleLedgerStore;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokReadyObservation;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokRuntimeManifestStore;
@@ -62,7 +62,7 @@ final class NgrokSupervisor
         private readonly NgrokAgentApiClient $agentApi,
         private readonly NgrokAgentApiAvailabilityPolicy $agentApiAvailability,
         private readonly NgrokProbeStabilityPolicy $probeStability,
-        private readonly RuntimeIdentityProbe $identity,
+        private readonly NgrokRuntimeIdentityProbe $identity,
         private readonly NgrokRuntimeRemoteAccessPolicy $debugPolicy,
         private readonly NgrokSupervisorShutdownSignal $shutdownSignal,
     ) {

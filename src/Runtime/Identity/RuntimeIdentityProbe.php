@@ -8,7 +8,7 @@ use Illuminate\Http\Client\Factory;
 use SimoneBianco\LaravelNgrokServer\Contracts\Runtime\NgrokRuntimeIdentityVerifier;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokLocalUpstream;
 
-final readonly class RuntimeIdentityProbe
+final readonly class RuntimeIdentityProbe implements NgrokRuntimeIdentityProbe
 {
     public function __construct(private Factory $http, private NgrokRuntimeIdentityVerifier $identity) {}
 
