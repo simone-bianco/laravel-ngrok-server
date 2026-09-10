@@ -27,7 +27,7 @@ final class HttpAgentApiReachabilityProbe implements AgentApiReachabilityProbe
                     'allow_redirects' => false,
                     'proxy' => '',
                     'on_stats' => static function (TransferStats $stats) use (&$errno): void {
-                        $errno = $stats->getHandlerStats()['errno'] ?? null;
+                        $errno = $stats->getHandlerErrorData();
                     },
                 ])->connectTimeout(1)->timeout(1)->acceptJson()->get(rtrim($address, '/').'/api/endpoints');
             } catch (ConnectionException) {
