@@ -50,6 +50,15 @@ final class NgrokRuntimeRecoveryTest extends TestCase
         $this->recovery($probe)->recover();
     }
 
+    public function test_clean_recovery_clears_an_interrupted_launcher_shutdown_before_reenabling_start(): void
+    {
+        app(NgrokRuntimeBootstrapper::class)->initialize();
+        app(NgrokSupervisorShutdownSignal::class)->request('interrupted_launcher');
+        self::assertSame('already_clean', $this->recovery(new ScriptedReachabilityProbe(true))->recover());
+        self::assertFalse(app(NgrokSupervisorShutdownSignal::class)->requested());
+        self::assertSame('enabled', app(NgrokRuntimeSpawnGate::class)->read()['state']);
+    }
+
     public function test_recovery_cleans_a_quiescent_attempt_and_removes_its_runtime_config(): void
     {
         [$attempt, $config] = $this->bootstrapAndArmAttempt();

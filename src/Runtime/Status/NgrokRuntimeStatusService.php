@@ -132,6 +132,11 @@ final readonly class NgrokRuntimeStatusService
             && ($settings?->desiredEnabled ?? false) === false
             && $settings !== null
             && $this->canonicalUpstream() !== null;
+        // This offers a recovery attempt; only the recovery lock/ownership probes authorize it.
+        $canRecover = $settingsCurrent && ! $supervisorFresh
+            && ($ledgerState === 'clean'
+                ? (! $spawnGateEnabled || $settings->desiredEnabled)
+                : PHP_OS_FAMILY === 'Windows' && ($ledger['process_ownership_type'] ?? null) === 'windows_job');
         $publicUrl = $summary === 'ready' && $readyEvidenceMatches && is_string(data_get($snapshot, 'edge.public_url'))
             ? data_get($snapshot, 'edge.public_url')
             : null;
@@ -185,15 +190,15 @@ final readonly class NgrokRuntimeStatusService
                     : null,
             ],
             'child' => [
-                'state' => is_string(data_get($snapshot, 'child.state')) ? data_get($snapshot, 'child.state') : ($ledgerState === 'clean' ? 'absent' : 'unknown'),
-                'pid' => is_int(data_get($snapshot, 'child.pid')) ? data_get($snapshot, 'child.pid') : null,
+                'state' => $supervisorFresh && is_string(data_get($snapshot, 'child.state')) ? data_get($snapshot, 'child.state') : ($ledgerState === 'clean' ? 'absent' : 'unknown'),
+                'pid' => $supervisorFresh && is_int(data_get($snapshot, 'child.pid')) ? data_get($snapshot, 'child.pid') : null,
             ],
             'edge' => [
-                'state' => is_string(data_get($snapshot, 'edge.state')) ? data_get($snapshot, 'edge.state') : 'unknown',
+                'state' => $supervisorFresh && is_string(data_get($snapshot, 'edge.state')) ? data_get($snapshot, 'edge.state') : ($ledgerState === 'clean' ? 'offline' : 'unknown'),
                 'public_url' => $publicUrl,
             ],
             'tunnel' => [
-                'state' => is_string(data_get($snapshot, 'edge.state')) ? data_get($snapshot, 'edge.state') : 'unknown',
+                'state' => $supervisorFresh && is_string(data_get($snapshot, 'edge.state')) ? data_get($snapshot, 'edge.state') : ($ledgerState === 'clean' ? 'offline' : 'unknown'),
                 'public_url' => $publicUrl,
             ],
             'upstream' => [
@@ -221,6 +226,7 @@ final readonly class NgrokRuntimeStatusService
             ],
             'actions' => [
                 'can_start' => $canStart,
+                'can_recover' => $canRecover,
                 'can_stop' => $settings?->desiredEnabled === true,
             ],
         ]);
@@ -528,6 +534,7 @@ final readonly class NgrokRuntimeStatusService
             ],
             'actions' => [
                 'can_start' => false,
+                'can_recover' => false,
                 'can_stop' => $settings?->desiredEnabled === true,
             ],
         ];

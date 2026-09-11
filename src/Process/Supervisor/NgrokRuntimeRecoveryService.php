@@ -56,6 +56,7 @@ final readonly class NgrokRuntimeRecoveryService
             if (($ledger['state'] ?? null) === 'clean') {
                 $this->fence->synchronized(function () use ($lock): void {
                     $this->assertDesiredDisabled();
+                    $this->shutdownSignal->reset();
                     $this->gate->enable($lock);
                 });
 

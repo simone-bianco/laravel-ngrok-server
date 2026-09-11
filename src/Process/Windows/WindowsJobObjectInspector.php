@@ -6,17 +6,10 @@ namespace SimoneBianco\LaravelNgrokServer\Process\Windows;
 
 use RuntimeException;
 use SimoneBianco\LaravelNgrokServer\Process\Ownership\NgrokProcessOwnership;
+use Symfony\Component\Process\Process;
 
 class WindowsJobObjectInspector
 {
-    private const int JOB_OBJECT_QUERY = 0x0004;
-
-    private const int ERROR_FILE_NOT_FOUND = 2;
-
-    private const int ERROR_INVALID_HANDLE = 6;
-
-    private mixed $ffi = null;
-
     public function exists(NgrokProcessOwnership $ownership): bool
     {
         if (PHP_OS_FAMILY !== 'Windows') {
@@ -26,58 +19,31 @@ class WindowsJobObjectInspector
             throw new RuntimeException('A handle-bound Windows Job Object identity is required.');
         }
 
-        $ffi = $this->ffi();
-        $handle = $ffi->OpenJobObjectW(
-            self::JOB_OBJECT_QUERY,
-            0,
-            $this->wideString($ffi, $ownership->id),
-        );
-        if ($handle === null || \FFI::isNull($handle)) {
-            $error = (int) $ffi->GetLastError();
-            if (in_array($error, [self::ERROR_FILE_NOT_FOUND, self::ERROR_INVALID_HANDLE], true)) {
-                return false;
-            }
+        // Native inspection runs in the same bounded, windowless helper for CLI and web callers.
+        // Herd's web SAPI cannot call FFI::cdef when ffi.enable=preload.
+        $process = new Process([
+            $this->phpWinBinary(), '-d', 'ffi.enable=true',
+            dirname(__DIR__, 3).'/resources/windows/job-object-exists.php', $ownership->id,
+        ], base_path());
+        $process->setTimeout(5);
 
-            throw new RuntimeException("Unable to inspect the ngrok Windows Job Object (error [$error]).");
-        }
-
-        $ffi->CloseHandle($handle);
-
-        return true;
+        return match ($process->run()) {
+            0 => true,
+            3 => false,
+            default => throw new RuntimeException('Unable to verify the ngrok Windows Job Object through the native inspection helper.'),
+        };
     }
 
-    private function ffi(): mixed
+    private function phpWinBinary(): string
     {
-        if ($this->ffi !== null) {
-            return $this->ffi;
-        }
-        if (! extension_loaded('ffi') || ! class_exists(\FFI::class)) {
-            throw new RuntimeException('Windows Job Object inspection requires PHP FFI.');
-        }
-
-        try {
-            $this->ffi = \FFI::cdef(<<<'CDEF'
-typedef void* HANDLE;
-typedef unsigned long DWORD;
-typedef int BOOL;
-typedef unsigned short WCHAR;
-HANDLE OpenJobObjectW(DWORD desired_access, BOOL inherit_handle, const WCHAR* name);
-BOOL CloseHandle(HANDLE handle);
-DWORD GetLastError(void);
-CDEF, 'kernel32.dll');
-        } catch (\Throwable $exception) {
-            throw new RuntimeException('Unable to load the Windows Job Object inspection API.', previous: $exception);
+        $configured = trim((string) config('ngrok-server.supervisor_php_binary', ''));
+        $candidate = $configured !== '' ? $configured : PHP_BINARY;
+        $cli = realpath($candidate);
+        $resolved = is_string($cli) ? realpath(dirname($cli).DIRECTORY_SEPARATOR.'php-win.exe') : false;
+        if (! is_string($resolved) || ! is_file($resolved) || strtolower(basename($resolved)) !== 'php-win.exe') {
+            throw new RuntimeException('The console-free PHP Windows binary is required for native Job Object inspection.');
         }
 
-        return $this->ffi;
-    }
-
-    private function wideString(mixed $ffi, string $value): mixed
-    {
-        $bytes = mb_convert_encoding($value."\0", 'UTF-16LE', 'UTF-8');
-        $buffer = $ffi->new('WCHAR['.intdiv(strlen($bytes), 2).']');
-        \FFI::memcpy($buffer, $bytes, strlen($bytes));
-
-        return $buffer;
+        return $resolved;
     }
 }
