@@ -22,7 +22,7 @@ final readonly class RuntimeIdentityProbe implements NgrokRuntimeIdentityProbe
                 'proxy' => '',
                 'verify' => $upstream->scheme !== 'https',
             ])->acceptJson()->timeout(2)
-                ->withHeader('X-Local-Gpt-Runtime-Nonce', $encoded);
+                ->withHeader('X-Agenticus-Mechanicus-Runtime-Nonce', $encoded);
             if ($hostHeader !== '') {
                 $request = $request->withHeader('Host', $hostHeader);
             }

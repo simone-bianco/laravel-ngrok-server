@@ -57,8 +57,8 @@ final class NgrokSupervisorPreflightTest extends TestCase
         self::assertFalse(is_dir($this->runtimeRoot.DIRECTORY_SEPARATOR.'configs'));
         Http::assertSentCount(1);
         Http::assertSent(static function (Request $request): bool {
-            self::assertSame('http://127.0.0.1:8000/_local-gpt/runtime-identity', $request->url());
-            self::assertNotEmpty($request->header('X-Local-Gpt-Runtime-Nonce'));
+            self::assertSame('http://127.0.0.1:8000/_agenticus-mechanicus/runtime-identity', $request->url());
+            self::assertNotEmpty($request->header('X-Agenticus-Mechanicus-Runtime-Nonce'));
 
             return true;
         });

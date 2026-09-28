@@ -45,6 +45,6 @@ final readonly class NgrokLocalUpstream
 
     public function identityUrl(): string
     {
-        return $this->value().'/_local-gpt/runtime-identity';
+        return $this->value().'/_agenticus-mechanicus/runtime-identity';
     }
 }
