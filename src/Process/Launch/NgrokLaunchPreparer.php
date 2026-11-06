@@ -39,7 +39,7 @@ final readonly class NgrokLaunchPreparer
         $endpoint = bin2hex(random_bytes(16));
         $port = $this->ports->allocate($excludedPorts);
         $binary = $this->binary->resolve();
-        $config = $this->configs->write($attempt, $port);
+        $config = $this->configs->write($attempt, $port, $endpoint, $supervisorInstanceId, $settings->externalOrigin, $upstream, $upstreamHostHeader);
         try {
             $this->binary->validateConfig($binary, $config['path']);
         } catch (\Throwable $exception) {

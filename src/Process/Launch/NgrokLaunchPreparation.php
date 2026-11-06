@@ -29,7 +29,7 @@ final readonly class NgrokLaunchPreparation
         public string $configSha256,
         public array $environment,
         public NgrokSettingsSnapshot $settings,
-        public string $upstreamHostHeader = '',
+        public string $upstreamHostHeader,
     ) {}
 
     public function withSettings(NgrokSettingsSnapshot $settings): self

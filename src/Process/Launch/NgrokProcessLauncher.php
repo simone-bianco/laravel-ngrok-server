@@ -10,21 +10,11 @@ final readonly class NgrokProcessLauncher
 
     public function start(NgrokLaunchPreparation $launch): OwnedNgrokProcess
     {
-        $metadata = json_encode([
-            'local_gpt_endpoint_instance_id' => $launch->endpointInstanceId,
-            'local_gpt_supervisor_instance_id' => $launch->supervisorInstanceId,
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         $command = [
             $launch->binary->path,
-            'http',
-            $launch->upstream->value(),
+            'start',
+            $launch->endpointInstanceId,
             '--config', $launch->configPath,
-            '--name', $launch->endpointInstanceId,
-            '--metadata', $metadata,
-            '--url', $launch->origin->value(),
-            '--host-header', $launch->upstreamHostHeader,
-            '--inspect=false',
-            '--pooling-enabled=false',
         ];
         $process = $this->processes->start($command, $launch->environment, $launch->ownership);
 

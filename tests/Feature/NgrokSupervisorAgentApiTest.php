@@ -21,6 +21,7 @@ use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokLifecycleLedgerStore;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokRuntimeManifestStore;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokRuntimeSnapshotStore;
 use SimoneBianco\LaravelNgrokServer\Tests\TestCase;
+use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokHostHeaderPolicy;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokLocalUpstream;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokSettingsSnapshot;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokSettingsVersion;
@@ -82,6 +83,27 @@ final class NgrokSupervisorAgentApiTest extends TestCase
         (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
 
         $this->assertRunningWithReason($owned, 'agent_api_temporarily_unavailable');
+    }
+
+    public function test_missing_host_policy_stops_the_owned_child_even_when_endpoint_and_upstream_are_online(): void
+    {
+        [$supervisor, $owned] = $this->ownedSupervisor();
+        $observations = 0;
+        Http::fake(function (Request $request) use ($owned, &$observations): mixed {
+            if ($request->url() === $owned->launch->upstream->identityUrl()) {
+                return Http::response(['protocol_version' => 1, 'mac' => 'valid']);
+            }
+            $endpoint = $this->endpoint($owned->launch);
+            unset($endpoint['traffic_policy']);
+
+            return ++$observations === 1
+                ? Http::response(['endpoints' => [$endpoint]])
+                : Http::response([], 404);
+        });
+
+        (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
+
+        $this->assertStoppedWithReason($owned, 'agent_api_endpoint_mismatch');
     }
 
     public function test_agent_api_unavailability_stops_owned_child_after_failure_grace(): void
@@ -189,6 +211,7 @@ final class NgrokSupervisorAgentApiTest extends TestCase
             hash_file('sha256', $config),
             [],
             $this->ngrokSettings->capture(),
+            'localhost',
         );
         $owned = new OwnedNgrokProcess(new AgentApiTestProcess, $launch, $startedAt);
         $this->setProperty($supervisor, 'manifest', $manifest);
@@ -206,6 +229,7 @@ final class NgrokSupervisorAgentApiTest extends TestCase
             'upstream' => ['url' => $launch->upstream->value()],
             'inspect' => false,
             'pooling_enabled' => false,
+            'traffic_policy' => json_encode(NgrokHostHeaderPolicy::definition($launch->upstreamHostHeader), JSON_THROW_ON_ERROR),
         ], $changes);
     }
 

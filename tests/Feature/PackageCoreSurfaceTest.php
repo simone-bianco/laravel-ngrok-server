@@ -17,6 +17,7 @@ use SimoneBianco\LaravelNgrokServer\Process\Launch\NgrokProcessHandle;
 use SimoneBianco\LaravelNgrokServer\Process\Launch\OwnedNgrokProcess;
 use SimoneBianco\LaravelNgrokServer\Process\Ownership\NgrokProcessOwnership;
 use SimoneBianco\LaravelNgrokServer\Tests\TestCase;
+use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokHostHeaderPolicy;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokLocalUpstream;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokSettingsSnapshot;
 use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokSettingsVersion;
@@ -42,14 +43,16 @@ final class PackageCoreSurfaceTest extends TestCase
     public function test_agent_config_is_secret_free_and_exclusive(): void
     {
         $attempt = str_repeat('a', 32);
-        $config = app(NgrokAgentConfigWriter::class)->write($attempt, 4041);
+        $launch = $this->launch();
+        $config = app(NgrokAgentConfigWriter::class)->write($attempt, 4041, $launch->endpointInstanceId, $launch->supervisorInstanceId, $launch->origin, $launch->upstream, $launch->upstreamHostHeader);
         $contents = File::get($config['path']);
 
-        self::assertStringContainsString('web_addr: 127.0.0.1:4041', $contents);
-        self::assertStringContainsString('inspect_db_size: -1', $contents);
+        $decoded = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('127.0.0.1:4041', $decoded['agent']['web_addr']);
+        self::assertSame(-1, $decoded['agent']['inspect_db_size']);
         self::assertStringNotContainsString('authtoken', strtolower($contents));
         $this->expectException(\RuntimeException::class);
-        app(NgrokAgentConfigWriter::class)->write($attempt, 4041);
+        app(NgrokAgentConfigWriter::class)->write($attempt, 4041, $launch->endpointInstanceId, $launch->supervisorInstanceId, $launch->origin, $launch->upstream, $launch->upstreamHostHeader);
     }
 
     public function test_environment_is_deny_by_default_except_for_the_ngrok_token(): void
@@ -76,6 +79,7 @@ final class PackageCoreSurfaceTest extends TestCase
             'upstream' => ['url' => $launch->upstream->value()],
             'inspect' => false,
             'pooling_enabled' => false,
+            'traffic_policy' => json_encode(NgrokHostHeaderPolicy::definition($launch->upstreamHostHeader), JSON_THROW_ON_ERROR),
         ]]])]);
         self::assertSame(NgrokAgentApiObservation::READY, app(NgrokAgentApiClient::class)->observe($launch)->state);
 
@@ -95,6 +99,7 @@ final class PackageCoreSurfaceTest extends TestCase
             'upstream' => ['url' => $launch->upstream->value()],
             'inspect' => false,
             'pooling_enabled' => false,
+            'traffic_policy' => json_encode(NgrokHostHeaderPolicy::definition($launch->upstreamHostHeader), JSON_THROW_ON_ERROR),
         ];
 
         Http::fakeSequence()
@@ -127,6 +132,7 @@ final class PackageCoreSurfaceTest extends TestCase
             agentApiAddress: 'http://127.0.0.1:4041', configPath: $this->runtimeRoot.'/config.yml',
             configRelativePath: 'configs/'.str_repeat('a', 32).'.yml', configSha256: hash('sha256', 'config'), environment: [],
             settings: new NgrokSettingsSnapshot(new NgrokSettingsVersion('00000000000000000000000000', 1), true, true, $origin, 'token', 'test'),
+            upstreamHostHeader: 'localhost',
         );
     }
 }

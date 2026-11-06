@@ -91,6 +91,7 @@ final class NgrokSupervisorGenerationTest extends TestCase
             hash_file('sha256', $config),
             [],
             $this->ngrokSettings->capture(),
+            'localhost',
         );
         $process = new GenerationTestProcess;
         $this->setProperty($supervisor, 'manifest', $manifest);

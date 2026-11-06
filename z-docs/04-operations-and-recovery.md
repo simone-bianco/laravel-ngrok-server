@@ -86,6 +86,8 @@ If the process crashes between fences, the durable gate remains disabled and lat
 
 ## Runtime Probe Stability
 
+The supervisor launches the exact named v3 endpoint from one immutable runtime config. That artifact includes the approved origin, loopback upstream, ownership metadata, disabled inspection/pooling and an explicit `add-headers` Traffic Policy for the configured application Host. The deprecated `--host-header` CLI flag is not used. The observed `/api/endpoints` policy must match the expected policy before Ready; missing, malformed, additional or changed actions are endpoint mismatch and follow the existing owned-child teardown fence. A running Agent API and healthy direct upstream alone do not prove public routing. Incident verification must also probe an actual public application route without credentials, redirects or replaying operational requests.
+
 After startup, one failed upstream/Agent API availability probe does not stop a healthy owned process. Transient availability failures publish `degraded`; recovery inside `runtime_probe_failure_grace_ms` clears the failure streak and returns to Ready without changing PID/spawn attempt. Continuous failure past the grace window triggers the normal owned teardown. Exact identity or Agent API endpoint mismatch remains immediate stop authority.
 
 This policy is intentionally about **continuous elapsed unavailability**, not retry count. CPU starvation can delay both the reconcile loop and HTTP responses; elapsed-time hysteresis makes that distinction observable while preserving fail-closed mismatch handling.

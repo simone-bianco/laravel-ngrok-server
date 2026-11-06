@@ -26,11 +26,11 @@ final readonly class NgrokBinaryResolver
         if ($version === '' || ! str_contains(strtolower($version), 'ngrok version 3.')) {
             throw new RuntimeException('Local GPT requires an ngrok v3 agent.');
         }
-        $help = new Process([$path, 'http', '--help'], null, $this->environment->build());
+        $help = new Process([$path, 'start', '--help'], null, $this->environment->build());
         $help->setTimeout(5);
         $help->run();
         $output = $help->getOutput().$help->getErrorOutput();
-        foreach (['--config', '--url', '--name', '--metadata', '--inspect', '--pooling-enabled'] as $requiredFlag) {
+        foreach (['--config'] as $requiredFlag) {
             if (! $help->isSuccessful() || ! str_contains($output, $requiredFlag)) {
                 throw new RuntimeException("The configured ngrok agent does not support required flag [$requiredFlag].");
             }

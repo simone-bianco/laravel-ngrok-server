@@ -6,6 +6,7 @@ namespace SimoneBianco\LaravelNgrokServer\AgentApi;
 
 use Illuminate\Http\Client\Factory;
 use SimoneBianco\LaravelNgrokServer\Process\Launch\NgrokLaunchPreparation;
+use SimoneBianco\LaravelNgrokServer\ValueObjects\NgrokHostHeaderPolicy;
 
 final readonly class NgrokAgentApiClient
 {
@@ -41,7 +42,8 @@ final readonly class NgrokAgentApiClient
             if (($endpoint['url'] ?? null) !== $launch->origin->value()
                 || $upstream !== $launch->upstream->value()
                 || ($endpoint['inspect'] ?? false) !== false
-                || ($endpoint['pooling_enabled'] ?? false) !== false) {
+                || ($endpoint['pooling_enabled'] ?? false) !== false
+                || ! NgrokHostHeaderPolicy::matches($endpoint['traffic_policy'] ?? null, $launch->upstreamHostHeader)) {
                 return NgrokAgentApiObservation::mismatch();
             }
 
