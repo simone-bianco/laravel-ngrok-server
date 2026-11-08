@@ -13,6 +13,8 @@ return [
     'settings_reconcile_interval_ms' => (int) env('NGROK_SERVER_RECONCILE_INTERVAL_MS', 1000),
     'agent_api_startup_grace_ms' => (int) env('NGROK_SERVER_AGENT_API_STARTUP_GRACE_MS', 5000),
     'runtime_probe_failure_grace_ms' => (int) env('NGROK_SERVER_RUNTIME_PROBE_FAILURE_GRACE_MS', 30000),
+    'runtime_identity_probe_timeout_ms' => (int) env('NGROK_SERVER_RUNTIME_IDENTITY_PROBE_TIMEOUT_MS', 5000),
+    'runtime_identity_probe_degraded_interval_ms' => (int) env('NGROK_SERVER_RUNTIME_IDENTITY_PROBE_DEGRADED_INTERVAL_MS', 3000),
     'ready_observation_max_age_ms' => (int) env('NGROK_SERVER_READY_OBSERVATION_MAX_AGE_MS', 2000),
     'heartbeat_stale_after_ms' => (int) env('NGROK_SERVER_HEARTBEAT_STALE_AFTER_MS', 6000),
     'process_stop_grace_seconds' => (int) env('NGROK_SERVER_STOP_GRACE_SECONDS', 5),

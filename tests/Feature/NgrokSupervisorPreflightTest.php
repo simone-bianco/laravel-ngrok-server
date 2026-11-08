@@ -7,6 +7,7 @@ namespace SimoneBianco\LaravelNgrokServer\Tests\Feature;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use ReflectionProperty;
 use SimoneBianco\LaravelNgrokServer\Process\Supervisor\NgrokSupervisor;
 use SimoneBianco\LaravelNgrokServer\Runtime\Bootstrap\NgrokRuntimeBootstrapper;
 use SimoneBianco\LaravelNgrokServer\Runtime\State\NgrokLifecycleLedgerStore;
@@ -75,6 +76,22 @@ final class NgrokSupervisorPreflightTest extends TestCase
         self::assertSame('error', $snapshot['summary'] ?? null);
         self::assertSame(['The ngrok binary is not configured.'], $snapshot['readiness']['reasons'] ?? null);
         self::assertSame('clean', app(NgrokLifecycleLedgerStore::class)->read()['state'] ?? null);
+        Http::assertSentCount(1);
+    }
+
+    public function test_stale_verification_flag_never_authorizes_a_spawn_without_a_fresh_probe(): void
+    {
+        $supervisor = app(NgrokSupervisor::class);
+        (new ReflectionProperty($supervisor, 'identityVerifiedAt'))->setValue($supervisor, microtime(true) - 10);
+        Http::fake(fn (): mixed => Http::response([], 503));
+
+        $this->runOneCycle();
+
+        $snapshot = app(NgrokRuntimeSnapshotStore::class)->read();
+        self::assertSame('blocked', $snapshot['summary'] ?? null);
+        self::assertSame(['upstream_identity_unavailable'], $snapshot['readiness']['reasons'] ?? null);
+        self::assertSame('absent', $snapshot['child']['state'] ?? null);
+        self::assertFalse(is_dir($this->runtimeRoot.DIRECTORY_SEPARATOR.'configs'));
         Http::assertSentCount(1);
     }
 

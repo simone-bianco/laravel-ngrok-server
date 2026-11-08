@@ -152,6 +152,41 @@ final class NgrokSupervisorAgentApiTest extends TestCase
         $this->assertStoppedWithReason($owned, 'upstream_identity_unavailable');
     }
 
+    public function test_sustained_identity_unavailability_after_verification_keeps_owned_child(): void
+    {
+        config()->set('ngrok-server.runtime_probe_failure_grace_ms', 100);
+        [$supervisor, $owned] = $this->ownedSupervisor(microtime(true) - 1);
+        $this->setProperty($supervisor, 'identityVerifiedAt', microtime(true) - 10);
+        $this->setProperty($supervisor, 'identityUnavailableSince', microtime(true) - 10);
+        Http::fake(fn (Request $request): mixed => $request->url() === $owned->launch->upstream->identityUrl()
+            ? Http::response([], 503)
+            : Http::response([], 500));
+
+        (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
+
+        $this->assertRunningWithReason($owned, 'upstream_identity_temporarily_unavailable');
+        $snapshot = app(NgrokRuntimeSnapshotStore::class)->read();
+        self::assertTrue($snapshot['identity']['verified'] ?? false);
+        Http::assertSentCount(1);
+    }
+
+    public function test_identity_unavailability_does_not_claim_agent_api_failure_without_observation(): void
+    {
+        [$supervisor, $owned] = $this->ownedSupervisor(microtime(true) - 1);
+        Http::fake(fn (Request $request): mixed => $request->url() === $owned->launch->upstream->identityUrl()
+            ? Http::response([], 503)
+            : Http::response([], 500));
+
+        (new ReflectionMethod($supervisor, 'reconcile'))->invoke($supervisor);
+
+        $snapshot = app(NgrokRuntimeSnapshotStore::class)->read();
+        self::assertSame('unknown', $snapshot['agent_api']['state'] ?? null);
+        self::assertFalse($snapshot['agent_api']['checked'] ?? null);
+        self::assertSame('unknown', $snapshot['edge']['state'] ?? null);
+        self::assertSame('temporarily_unavailable', $snapshot['upstream']['state'] ?? null);
+        Http::assertSentCount(1);
+    }
+
     public function test_upstream_identity_mismatch_stops_owned_child_immediately(): void
     {
         config()->set('ngrok-server.runtime_probe_failure_grace_ms', 60_000);

@@ -16,12 +16,13 @@ final readonly class RuntimeIdentityProbe implements NgrokRuntimeIdentityProbe
     {
         $nonce = random_bytes(32);
         $encoded = $this->identity->encodeNonce($nonce);
+        $timeoutSeconds = max(1000, min(30000, (int) config('ngrok-server.runtime_identity_probe_timeout_ms', 5000))) / 1000;
         try {
             $request = $this->http->withOptions([
                 'allow_redirects' => false,
                 'proxy' => '',
                 'verify' => $upstream->scheme !== 'https',
-            ])->acceptJson()->timeout(2)
+            ])->acceptJson()->timeout($timeoutSeconds)
                 ->withHeader('X-Agenticus-Mechanicus-Runtime-Nonce', $encoded);
             if ($hostHeader !== '') {
                 $request = $request->withHeader('Host', $hostHeader);

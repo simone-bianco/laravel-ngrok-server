@@ -46,7 +46,19 @@ final class NgrokSupervisor
 
     private ?float $identityUnavailableSince = null;
 
+    private ?float $identityVerifiedAt = null;
+
+    private ?float $identityObservedAt = null;
+
+    private ?string $identityState = null;
+
+    private float $nextIdentityProbeAt = 0.0;
+
     private ?float $agentApiUnavailableSince = null;
+
+    private ?float $agentApiCheckedAt = null;
+
+    private ?string $agentApiState = null;
 
     public function __construct(
         private readonly NgrokRuntimeLock $lock,
@@ -190,29 +202,61 @@ final class NgrokSupervisor
             if (! $this->owned->launch->settings->version->equals($settings->version)) {
                 $this->owned = $this->owned->withSettings($settings);
             }
-            $identity = $this->identity->observe(
-                $this->owned->launch->upstream,
-                $this->owned->launch->upstreamHostHeader,
-            );
-            if ($identity->state === RuntimeIdentityObservation::MISMATCH) {
-                $this->stopOwned('upstream_identity_mismatch', $settings);
+            $now = microtime(true);
+
+            // A verified identity belongs to the exact owned attempt. Once the
+            // upstream has proven its identity for this child, a slow or
+            // temporarily unreachable upstream cannot revoke ownership: keep
+            // the healthy ngrok process and report degradation. A child that
+            // has never been verified remains fail-closed and still uses the
+            // bounded grace below.
+            if ($this->identityUnavailableSince !== null
+                && $this->identityVerifiedAt === null
+                && $this->probeStability->transientFailureGraceExpired($this->identityUnavailableSince, $now)) {
+                $this->stopOwned('upstream_identity_unavailable', $settings);
 
                 return;
             }
-            if ($identity->state === RuntimeIdentityObservation::UNAVAILABLE) {
-                $this->identityUnavailableSince ??= microtime(true);
-                if ($this->probeStability->transientFailureGraceExpired($this->identityUnavailableSince)) {
-                    $this->stopOwned('upstream_identity_unavailable', $settings);
+
+            if ($this->identityProbeIsDue($now)) {
+                $owned = $this->owned;
+                $identity = $this->identity->observe(
+                    $owned->launch->upstream,
+                    $owned->launch->upstreamHostHeader,
+                );
+                if ($this->owned !== $owned) {
+                    // A delayed probe result must never be applied to a newer attempt.
+                    return;
+                }
+                $this->recordIdentityObservation($identity->state);
+                if ($identity->state === RuntimeIdentityObservation::MISMATCH) {
+                    $this->stopOwned('upstream_identity_mismatch', $settings);
 
                     return;
                 }
+                if ($identity->state === RuntimeIdentityObservation::UNAVAILABLE) {
+                    $this->identityUnavailableSince ??= $now;
+                    $this->scheduleIdentityProbeRetry($now);
+                    $this->publish('degraded', 'degraded', ['upstream_identity_temporarily_unavailable'], $settings, $this->owned);
+
+                    return;
+                }
+                $this->identityVerifiedAt = microtime(true);
+                $this->identityUnavailableSince = null;
+                $this->clearIdentityProbeRetry();
+            } else {
+                // The last observation was transport unavailability. Reuse it
+                // instead of adding another request to an already loaded pool.
                 $this->publish('degraded', 'degraded', ['upstream_identity_temporarily_unavailable'], $settings, $this->owned);
 
                 return;
             }
-            $this->identityUnavailableSince = null;
 
+            $this->agentApiState = null;
+            $this->agentApiCheckedAt = null;
             $agentApi = $this->agentApi->observe($this->owned->launch);
+            $this->agentApiState = $agentApi->state;
+            $this->agentApiCheckedAt = microtime(true);
             if ($agentApi->state === NgrokAgentApiObservation::MISMATCH) {
                 $this->stopOwned('agent_api_endpoint_mismatch', $settings);
 
@@ -244,6 +288,8 @@ final class NgrokSupervisor
 
         $ledger = $this->ledgers->requireState($this->requireManifest(), 'clean');
         if (! $settings->desiredEnabled) {
+            $this->identityUnavailableSince = null;
+            $this->clearIdentityProbeRetry();
             $this->publish('stopped', 'stopped', [], $settings, ledger: $ledger);
 
             return;
@@ -254,10 +300,33 @@ final class NgrokSupervisor
             return;
         }
 
+        // No owned child exists here, so a successful probe authorizes a spawn
+        // but never counts as identity evidence for the child that will start.
+        $this->identityVerifiedAt = null;
         $upstream = $this->preparer->resolveUpstream();
         $upstreamHostHeader = $this->preparer->resolveUpstreamHostHeader();
+        $now = microtime(true);
+        if (! $this->identityProbeIsDue($now)) {
+            $this->publish(
+                'blocked',
+                'blocked',
+                [$this->identityState === RuntimeIdentityObservation::MISMATCH ? 'upstream_identity_mismatch' : 'upstream_identity_unavailable'],
+                $settings,
+                ledger: $ledger,
+            );
+
+            return;
+        }
         $identity = $this->identity->observe($upstream, $upstreamHostHeader);
+        $this->recordIdentityObservation($identity->state);
         if ($identity->state !== RuntimeIdentityObservation::READY) {
+            if ($identity->state === RuntimeIdentityObservation::UNAVAILABLE) {
+                $this->identityUnavailableSince ??= $now;
+                $this->scheduleIdentityProbeRetry($now);
+            } else {
+                $this->identityUnavailableSince = null;
+                $this->clearIdentityProbeRetry();
+            }
             $this->publish(
                 'blocked',
                 'blocked',
@@ -268,6 +337,8 @@ final class NgrokSupervisor
 
             return;
         }
+        $this->identityUnavailableSince = null;
+        $this->clearIdentityProbeRetry();
         $preparation = $this->preparer->prepare($settings, $this->supervisorInstanceId, $this->bootEpochId);
         $this->owned = $this->spawnFenced($preparation);
         $this->resetProbeFailures();
@@ -402,7 +473,40 @@ final class NgrokSupervisor
     private function resetProbeFailures(): void
     {
         $this->identityUnavailableSince = null;
+        $this->identityVerifiedAt = null;
+        $this->identityObservedAt = null;
+        $this->identityState = null;
+        $this->nextIdentityProbeAt = 0.0;
         $this->agentApiUnavailableSince = null;
+        $this->agentApiCheckedAt = null;
+        $this->agentApiState = null;
+    }
+
+    private function identityProbeIsDue(float $now): bool
+    {
+        return $this->nextIdentityProbeAt <= 0.0 || $now >= $this->nextIdentityProbeAt;
+    }
+
+    private function scheduleIdentityProbeRetry(float $now): void
+    {
+        $intervalMs = max(1000, min(10000, (int) config('ngrok-server.runtime_identity_probe_degraded_interval_ms', 3000)));
+        $this->nextIdentityProbeAt = $now + ($intervalMs / 1000);
+    }
+
+    private function clearIdentityProbeRetry(): void
+    {
+        $this->nextIdentityProbeAt = 0.0;
+    }
+
+    private function recordIdentityObservation(string $state): void
+    {
+        $this->identityState = $state;
+        $this->identityObservedAt = microtime(true);
+    }
+
+    private function isoTimestamp(?float $timestamp): ?string
+    {
+        return $timestamp === null ? null : gmdate(DATE_ATOM, (int) $timestamp);
     }
 
     /** @param list<string> $reasons @param array<string, mixed>|null $ledger */
@@ -418,6 +522,21 @@ final class NgrokSupervisor
             }
         }
         $running = $owned?->process->isRunning() === true;
+        $agentApiChecked = $owned !== null && $this->agentApiState !== null;
+        $agentApiState = $agentApiChecked ? $this->agentApiState : 'unknown';
+        $edgeState = $summary === 'ready'
+            ? 'online'
+            : ($running
+                ? ($agentApiChecked ? 'connecting' : ($summary === 'starting' ? 'starting' : 'unknown'))
+                : ($summary === 'starting' ? 'starting' : 'offline'));
+        $upstreamState = in_array('upstream_identity_mismatch', $reasons, true)
+            ? 'identity_mismatch'
+            : ($summary === 'ready'
+                ? 'healthy'
+                : (in_array('upstream_identity_temporarily_unavailable', $reasons, true)
+                    ? 'temporarily_unavailable'
+                    : (in_array('upstream_identity_unavailable', $reasons, true) ? 'unavailable' : 'unknown')));
+        $identityVerified = $owned !== null && $this->identityVerifiedAt !== null;
         $this->snapshots->publish([
             'summary' => $summary,
             'desired' => [
@@ -429,13 +548,30 @@ final class NgrokSupervisor
             'ledger' => ['state' => $ledger['state'] ?? 'unknown', 'state_sequence' => $ledger['state_sequence'] ?? null, 'spawn_attempt_id' => $ledger['spawn_attempt_id'] ?? null],
             'supervisor' => ['state' => 'online', 'instance_id' => $this->supervisorInstanceId, 'boot_epoch_id' => $this->bootEpochId, 'heartbeat_at' => gmdate(DATE_ATOM)],
             'child' => ['state' => $running ? 'running' : ($summary === 'starting' ? 'starting' : 'absent'), 'pid' => $running ? $owned?->process->getPid() : null, 'endpoint_instance_id' => $owned?->launch->endpointInstanceId],
-            'agent_api' => ['state' => $summary === 'ready' ? 'ready' : ($running ? 'unavailable' : 'unknown'), 'address' => $owned?->launch->agentApiAddress],
-            'edge' => ['state' => $summary === 'ready' ? 'online' : ($running ? 'connecting' : 'offline'), 'public_url' => $summary === 'ready' ? $owned?->launch->origin->value() : null],
-            'upstream' => ['state' => in_array('upstream_identity_mismatch', $reasons, true) ? 'identity_mismatch' : ($summary === 'ready' ? 'healthy' : 'unknown'), 'url' => $owned?->launch->upstream->value()],
+            'agent_api' => [
+                'state' => $agentApiState,
+                'checked' => $agentApiChecked,
+                'checked_at' => $this->isoTimestamp($this->agentApiCheckedAt),
+                'address' => $owned?->launch->agentApiAddress,
+            ],
+            'edge' => ['state' => $edgeState, 'public_url' => $summary === 'ready' ? $owned?->launch->origin->value() : null],
+            'upstream' => ['state' => $upstreamState, 'url' => $owned?->launch->upstream->value()],
+            'identity' => [
+                'state' => $this->identityState ?? 'unknown',
+                'verified' => $identityVerified,
+                'verified_at' => $this->isoTimestamp($this->identityVerifiedAt),
+                'observed_at' => $this->isoTimestamp($this->identityObservedAt),
+                'unavailable_since' => $this->isoTimestamp($this->identityUnavailableSince),
+                'unavailable_ms' => $this->identityUnavailableSince === null
+                    ? null
+                    : max(0, (int) round((microtime(true) - $this->identityUnavailableSince) * 1000)),
+            ],
             'readiness' => ['state' => $readiness, 'reasons' => array_values(array_unique($reasons))],
             'diagnostics' => [
                 'ngrok_version' => $owned?->launch->binary->version,
                 'agent_api_port' => $owned?->launch->agentApiPort,
+                'identity_probe_timeout_ms' => max(1000, min(30000, (int) config('ngrok-server.runtime_identity_probe_timeout_ms', 5000))),
+                'identity_probe_degraded_interval_ms' => max(1000, min(10000, (int) config('ngrok-server.runtime_identity_probe_degraded_interval_ms', 3000))),
                 'debug_mode' => $this->debugPolicy->debugEnabled(),
                 'force_access_in_debug_mode' => $this->debugPolicy->overrideEnabled(),
                 'debug_override_active' => $this->debugPolicy->overrideActive(),

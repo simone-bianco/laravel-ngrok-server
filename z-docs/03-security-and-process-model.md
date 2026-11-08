@@ -4,6 +4,9 @@
 
 - A PID, process image name, manifest, or stale snapshot never grants kill authority.
 - A new spawn requires an initialized manifest, linked clean ledger, enabled spawn gate, current settings generation, permitted remote policy, and healthy upstream identity.
+- A verified identity is bound to the exact owned attempt; transport unavailability cannot revoke that evidence or grant kill authority.
+- An unverified child remains fail-closed and is stopped when continuous identity unavailability exceeds the bounded grace.
+- A pre-spawn identity success authorizes only that spawn; the started child must still prove its own identity before Ready.
 - Unknown, corrupt, missing, stale, or contradictory ownership evidence blocks launch and requires recovery.
 - Ready status requires fresh identity and exact Agent API endpoint evidence.
 - Runtime status is sanitized; credentials and process-control authority remain server-side.

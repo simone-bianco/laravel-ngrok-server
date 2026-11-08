@@ -13,6 +13,18 @@ composer test
 
 Package tests cover the service provider, Agent API, durable files, bootstrap, spawn gate, supervisor safety and generation binding, platform launch behavior, recovery, shutdown, and control side effects.
 
+### Standalone identity-stability harness
+
+When `orchestra/testbench` is unavailable on the host, run the tunnel-free supervisor harness against the canonical package source:
+
+```bash
+php vendor/bin/phpunit \
+  --bootstrap packages/simone-bianco/laravel-ngrok-server/tests-standalone/bootstrap.php \
+  packages/simone-bianco/laravel-ngrok-server/tests-standalone/NgrokSupervisorIdentityStabilityTest.php
+```
+
+The harness uses fake processes, HTTP responses, clocks and filesystem roots. It never starts, stops or probes the real ngrok tunnel. Set `NGROK_STANDALONE_SRC` to a comparison source tree to reproduce the pre-fix behavior.
+
 ## Host Integration Gates
 
 After binding host adapters, run the configured doctor command:
@@ -49,7 +61,7 @@ flowchart LR
 | Bootstrap required | Run explicit bootstrap only for a new installation with no prior lifecycle artifacts. |
 | Recovery required | Disable desired state, preserve artifacts, and run recovery. |
 | Transition in progress | A fenced bootstrap/recovery owns the durable gate. Retry status later; do not bypass the gate. |
-| Upstream identity temporarily unavailable | Keep exact owned child during grace; timeout/5xx is not proof of wrong identity. |
+| Upstream identity temporarily unavailable | Keep the exact owned child when that attempt was previously verified; timeout/5xx is not proof of wrong identity. An unverified child still uses `runtime_probe_failure_grace_ms`. |
 | Upstream identity protocol/MAC mismatch | Immediate owned teardown; treat as security/authority failure. |
 | Agent API temporarily unavailable | Owned child stays alive and status becomes `degraded` during `runtime_probe_failure_grace_ms`; investigate local CPU/upstream pressure before forcing lifecycle changes. |
 | Agent API endpoint mismatch | Immediate owned teardown; verify the selected loopback port and exact endpoint identity, never hide the mismatch behind retry grace. |
